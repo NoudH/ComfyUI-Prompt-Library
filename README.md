@@ -29,19 +29,10 @@ Includes a dedicated **Random Prompt** node for automatic prompt variation on ev
 
 ## 🚀 Installation
 
-1. Copy the **entire `prompt_library_node/` folder** into your ComfyUI custom nodes directory:
+1. Clone this repo into your ComfyUI custom nodes directory:
 
-```
-ComfyUI/
-└── custom_nodes/
-    └── prompt_library_node/   ← paste here
-        ├── __init__.py
-        ├── prompt_library.py
-        ├── prompt_library_data.json   (created automatically on first save)
-        └── web/
-            ├── prompt_library.js
-            ├── prompt_library_style_loader.js
-            └── prompt_library.css
+```bash
+git clone https://github.com/florestefano1975/ComfyUI-Prompt-Library
 ```
 
 2. Restart ComfyUI.
