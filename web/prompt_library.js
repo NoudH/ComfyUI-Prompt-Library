@@ -61,6 +61,7 @@ let state = {
   categories: [],
   prompts: [],
   selectedCategoryId: null,
+  selectedPromptIds: [],
   expandedCategories: new Set(),
   searchQuery: "",
   editingPrompt: null,
@@ -145,6 +146,7 @@ function showModal(content, onClose) {
 //  Main panel renderer
 // ──────────────────────────────────────────────────────────────────
 class PromptLibraryPanel {
+
   constructor(node) {
     this.node = node;
     this.container = null;
@@ -154,6 +156,15 @@ class PromptLibraryPanel {
     const data = await API.get();
     state.categories = data.categories || [];
     state.prompts = data.prompts || [];
+
+    // Sync from node if exists
+    if (this.node) {
+      const w = this.node.widgets?.find((w) => w.name === "prompt_ids");
+      if (w && w.value) {
+        state.selectedPromptIds = w.value.split(",").map(id => id.trim()).filter(Boolean);
+      }
+    }
+
     this.render();
   }
 
@@ -394,13 +405,13 @@ class PromptLibraryPanel {
 
   buildPromptCard(prompt) {
     const cat = state.categories.find((c) => c.id === prompt.category_id);
+    const isSelected = state.selectedPromptIds.includes(prompt.id);
     const card = document.createElement("div");
-    card.className = "pl-card";
+    card.className = "pl-card" + (isSelected ? " selected" : "");
     card.innerHTML = `
       <div class="pl-card-header">
         <span class="pl-card-title">${prompt.title}</span>
         <div class="pl-card-header-actions">
-          <button class="pl-icon-btn" title="Use this prompt" data-action="use">↗</button>
           <button class="pl-icon-btn" title="Edit" data-action="edit">✎</button>
           <button class="pl-icon-btn pl-icon-btn-danger" title="Delete" data-action="delete">✕</button>
         </div>
@@ -414,11 +425,14 @@ class PromptLibraryPanel {
           ? `<div class="pl-card-tags">${prompt.tags.map((t) => `<span class="pl-tag">${t}</span>`).join("")}</div>`
           : ""
       }
+      <input type="checkbox" style="display:none" ${isSelected ? "checked" : ""}>
     `;
 
-    card.querySelector("[data-action='use']").addEventListener("click", () => {
-      this.usePrompt(prompt);
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".pl-card-header-actions")) return;
+      this.togglePrompt(prompt);
     });
+
     card.querySelector("[data-action='edit']").addEventListener("click", () => {
       this.openPromptEditor(prompt);
     });
@@ -429,18 +443,33 @@ class PromptLibraryPanel {
     return card;
   }
 
-  // ── Use prompt (set node widget value) ───────────────────────────
-  usePrompt(prompt) {
-    if (this.node) {
-      // Find the prompt_id widget and set it
-      const w = this.node.widgets?.find((w) => w.name === "prompt_id");
-      if (w) {
-        w.value = prompt.id;
-        this.node.setDirtyCanvas(true);
-      }
+  // ── Toggle prompt selection ─────────────────────────────────────
+  togglePrompt(prompt) {
+    const idx = state.selectedPromptIds.indexOf(prompt.id);
+    if (idx === -1) {
+      state.selectedPromptIds.push(prompt.id);
+      this.showToast(`✓ Selected: ${prompt.title}`);
+    } else {
+      state.selectedPromptIds.splice(idx, 1);
+      this.showToast(`✕ Unselected: ${prompt.title}`);
     }
-    // Flash feedback
-    this.showToast(`✓ Loaded: ${prompt.title}`);
+
+    if (this.node) {
+      const wIds = this.node.widgets?.find((w) => w.name === "prompt_ids");
+      if (wIds) {
+        wIds.value = state.selectedPromptIds.join(",");
+      }
+
+      const wTitles = this.node.widgets?.find((w) => w.name === "prompts");
+      if (wTitles) {
+        const selectedPrompts = state.selectedPromptIds.map(id => {
+          return state.prompts.find(p => p.id === id)?.title || id;
+        });
+        wTitles.value = selectedPrompts.join(", ");
+      }
+      this.node.setDirtyCanvas(true);
+    }
+    this.render();
   }
 
   showToast(msg) {
@@ -974,6 +1003,71 @@ app.registerExtension({
         const panel = new PromptLibraryRandomPanel(this);
         panel.container = el;
         panel.init();
+      };
+    }
+
+    // ── String concatenate node ────────────────────────────────────
+    if (nodeData.name === "StringConcatenateNode") {
+      const onNodeCreated = nodeType.prototype.onNodeCreated;
+      nodeType.prototype.onNodeCreated = function () {
+        onNodeCreated?.apply(this, arguments);
+
+        const inputCountWidget = this.widgets.find((w) => w.name === "input_count");
+        const delimiterWidget = this.widgets.find((w) => w.name === "delimiter");
+        const resultWidget = this.widgets.find((w) => w.name === "result");
+
+        if (resultWidget) {
+          resultWidget.inputEl.readOnly = true;
+          resultWidget.inputEl.style.opacity = 0.7;
+        }
+
+        const syncInputs = (count) => {
+          if (!this.inputs) this.inputs = [];
+
+          // Add inputs up to count
+          for (let i = 1; i <= count; i++) {
+            const name = `string${i}`;
+            if (this.findInputSlot(name) === -1) {
+              this.addInput(name, "STRING");
+            }
+          }
+
+          // Remove inputs beyond count
+          for (let i = this.inputs.length - 1; i >= 0; i--) {
+            const name = this.inputs[i].name;
+            if (name.startsWith("string")) {
+              const num = parseInt(name.replace("string", ""));
+              if (num > count || isNaN(num)) {
+                this.removeInput(i);
+              }
+            }
+          }
+
+          this.setDirtyCanvas(true);
+        };
+
+        if (inputCountWidget) {
+          const self = this;
+          const origCallback = inputCountWidget.callback;
+          inputCountWidget.callback = function (v) {
+            const res = origCallback?.apply(this, arguments);
+            syncInputs(v);
+            return res;
+          };
+        }
+
+        if (delimiterWidget) {
+          const origCallback = delimiterWidget.callback;
+          delimiterWidget.callback = function (v) {
+            const res = origCallback?.apply(this, arguments);
+            return res;
+          };
+        }
+
+        // Initial sync
+        setTimeout(() => {
+          if (inputCountWidget) syncInputs(inputCountWidget.value);
+        }, 0);
       };
     }
   },

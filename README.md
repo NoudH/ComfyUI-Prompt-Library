@@ -23,9 +23,22 @@ Includes a dedicated **Random Prompt** node for automatic prompt variation on ev
 | ✎ **Edit in place** | Modal editors for prompts and categories |
 | 🎲 **Random mode** | Separate node that picks a random prompt from selected categories at every run |
 | 🌱 **Seed control** | Fixed seed for reproducible results, `-1` for true randomness |
+| 🔀 **Random segments** | Support for `{abc|xyz|123}` syntax (supports nesting) |
 | 💾 **Auto-persist** | All data saved to `prompt_library_data.json` |
 
 ---
+
+### 🔡 String Concatenate
+
+A utility node that concatenates multiple string inputs with a custom delimiter. The number of inputs can be adjusted dynamically, and a live preview of the result is shown on the node.
+
+| Input | Description |
+|---|---|
+| `delimiter` | The string used to join the inputs (e.g., ", ", " ", "\n") |
+| `input_count` | How many string inputs to show (2 to 20) |
+| `string1-N` | Dynamic string inputs (can be connected from other nodes) |
+
+Returns a single concatenated `STRING`.
 
 ## 🚀 Installation
 
@@ -58,7 +71,9 @@ Browse your library, search, manage categories, and load any prompt with one cli
 
 | Input | Description |
 |---|---|
-| `prompt_id` | Auto-filled when you click ↗ on a card in the UI |
+| `prompt_ids` | Auto-filled when you click a card in the UI |
+| `prompts` | Human-readable list of selected prompt titles |
+| `seed` | `-1` = truly random on every run · any other value = reproducible result (for random segments `{a|b}`) |
 | `prefix` *(optional)* | Text prepended to the positive prompt |
 | `suffix` *(optional)* | Text appended to the positive prompt |
 

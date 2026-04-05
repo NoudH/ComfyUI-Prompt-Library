@@ -1,6 +1,8 @@
 import json
 import os
 import uuid
+import re
+import random
 from datetime import datetime
 from aiohttp import web
 from server import PromptServer
@@ -24,6 +26,37 @@ def save_library(data):
     """Save the prompt library to disk."""
     with open(LIBRARY_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def process_random_segments(text, rng=None):
+    """
+    Finds segments like {abc|xyz|123} and picks one choice randomly.
+    Supports nested segments like {a|{b|c}}.
+    Can use a provided random.Random instance for deterministic results.
+    """
+    if not text:
+        return text
+
+    if rng is None:
+        rng = random
+
+    def replace_choice(match):
+        choices = match.group(1).split("|")
+        return rng.choice(choices)
+
+    # Regex: find anything inside { } that contains at least one |
+    # and does NOT contain nested brackets. This ensures we process from inside out.
+    pattern = r"\{([^{}]*\|[^{}]*)\}"
+    
+    # Process from the inside out until no more patterns match
+    new_text = text
+    while True:
+        processed = re.sub(pattern, replace_choice, new_text)
+        if processed == new_text:
+            break
+        new_text = processed
+        
+    return new_text
 
 
 # ──────────────────────────────────────────────
@@ -147,7 +180,9 @@ class PromptLibraryNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt_id": ("STRING", {"default": ""}),
+				"prompts": ("STRING", {"default": ""}),
+                "prompt_ids": ("STRING", {"default": ""}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 2**31 - 1}),
             },
             "optional": {
                 "prefix": ("STRING", {"default": "", "multiline": False}),
@@ -161,14 +196,26 @@ class PromptLibraryNode:
     CATEGORY = "utils/prompts"
     OUTPUT_NODE = False
 
-    def load_prompt(self, prompt_id, prefix="", suffix=""):
+    def load_prompt(self, prompts="", prompt_ids="", seed=-1, prefix="", suffix=""):
         library = load_library()
-        for p in library["prompts"]:
-            if p["id"] == prompt_id:
-                positive = " ".join(filter(None, [prefix.strip(), p["text"].strip(), suffix.strip()]))
-                return (positive, p.get("negative", ""))
-        # Return empty if not found
-        return (prefix.strip(), "")
+        ids = [pid.strip() for pid in prompt_ids.split(",") if pid.strip()]
+        matched = [p for p in library["prompts"] if p["id"] in ids]
+        # Preserve the order from prompt_ids
+        id_order = {pid: i for i, pid in enumerate(ids)}
+        matched.sort(key=lambda p: id_order.get(p["id"], 0))
+
+        texts = [p["text"].strip() for p in matched if p["text"].strip()]
+        negatives = [p["negative"].strip() for p in matched if p.get("negative", "").strip()]
+
+        positive = ", ".join(filter(None, [prefix.strip()] + texts + [suffix.strip()]))
+        negative = ", ".join(negatives)
+
+        # Apply randomization
+        rng = random.Random(seed if seed != -1 else None)
+        positive = process_random_segments(positive, rng)
+        negative = process_random_segments(negative, rng)
+
+        return (positive, negative)
 
 
 class PromptLibraryRandomNode:
@@ -199,8 +246,6 @@ class PromptLibraryRandomNode:
     OUTPUT_NODE = False
 
     def pick_random(self, category_ids, seed=-1, prefix="", suffix=""):
-        import random
-
         library = load_library()
 
         if not category_ids.strip():
@@ -229,15 +274,56 @@ class PromptLibraryRandomNode:
         chosen = rng.choice(pool)
 
         positive = " ".join(filter(None, [prefix.strip(), chosen["text"].strip(), suffix.strip()]))
-        return (positive, chosen.get("negative", ""), chosen.get("title", ""), chosen["id"])
+        negative = chosen.get("negative", "")
 
+        # Apply randomization using the same seed for reproducibility if seed != -1
+        positive = process_random_segments(positive, rng)
+        negative = process_random_segments(negative, rng)
+
+        return (positive, negative, chosen.get("title", ""), chosen["id"])
+
+
+class StringConcatenateNode:
+    """
+    A simple node that concatenates n string inputs.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "delimiter": ("STRING", {"default": ", "}),
+                "input_count": ("INT", {"default": 2, "min": 2, "max": 20, "step": 1}),
+            },
+            "optional": {
+                **{
+                    f"string{i}": ("STRING", {"forceInput": True, "default": ""})
+                    for i in range(1, 21)
+                }
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("Result",)
+    FUNCTION = "concatenate"
+    CATEGORY = "utils/strings"
+
+    def concatenate(self, delimiter, input_count, **kwargs):
+        values = []
+        for i in range(1, input_count + 1):
+            k = f"string{i}"
+            if k in kwargs:
+                values.append(str(kwargs[k]))
+        return (delimiter.join(values),)
 
 NODE_CLASS_MAPPINGS = {
     "PromptLibraryNode": PromptLibraryNode,
     "PromptLibraryRandomNode": PromptLibraryRandomNode,
+    "StringConcatenateNode": StringConcatenateNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "PromptLibraryNode": "📚 Prompt Library",
     "PromptLibraryRandomNode": "🎲 Prompt Library — Random",
+    "StringConcatenateNode": "🔡 String Concatenate",
 }
