@@ -45,7 +45,7 @@ Returns a single concatenated `STRING`.
 1. Clone this repo into your ComfyUI custom nodes directory:
 
 ```bash
-git clone https://github.com/florestefano1975/ComfyUI-Prompt-Library
+git clone https://github.com/NoudH/ComfyUI-Prompt-Library
 ```
 
 2. Restart ComfyUI.
